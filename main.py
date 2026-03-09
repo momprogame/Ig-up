@@ -1,10 +1,14 @@
 import os
 import asyncio
+import time
+import random
+import json
 from pyrogram import Client, filters
 from instagrapi import Client as InstaClient
+from instagrapi.exceptions import ChallengeRequired, LoginRequired
 from pyrogram.types import ReplyKeyboardMarkup, KeyboardButton, ForceReply, InlineKeyboardMarkup, InlineKeyboardButton
 
-# Variables de entorno
+# ========== VARIABLES DE ENTORNO ==========
 TELEGRAM_API_ID = os.getenv('TELEGRAM_API_ID')
 TELEGRAM_API_HASH = os.getenv('TELEGRAM_API_HASH')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -12,27 +16,120 @@ INSTAGRAM_USUARIO = os.getenv('INSTAGRAM_USERNAME')
 INSTAGRAM_CONTRASENA = os.getenv('INSTAGRAM_PASSWORD')
 ARCHIVO_USUARIOS_AUTORIZADOS = "authorized_users.txt"
 ARCHIVO_CAPTION = "caption.txt"
-ARCHIVO_MODO_USUARIO = "modos_usuario.txt"  # Nuevo archivo para guardar modos
+ARCHIVO_MODO_USUARIO = "modos_usuario.txt"
+ARCHIVO_SESION = "instagram_session.json"
 
-# Diccionario para almacenar datos temporales de usuarios
+# ========== VERIFICACIÓN DE VARIABLES ==========
+if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN, INSTAGRAM_USUARIO, INSTAGRAM_CONTRASENA]):
+    print("❌ Error: Faltan variables de entorno")
+    print("Necesitas configurar:")
+    print("  - TELEGRAM_API_ID")
+    print("  - TELEGRAM_API_HASH")
+    print("  - TELEGRAM_BOT_TOKEN")
+    print("  - INSTAGRAM_USERNAME")
+    print("  - INSTAGRAM_PASSWORD")
+    exit(1)
+
+# ========== DICCIONARIO PARA DATOS TEMPORALES ==========
 # {user_id: {'esperando': 'caption', 'ruta_video': 'ruta', 'multiple': False}}
 datos_usuario = {}
 
-# Verificar variables
-if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN, INSTAGRAM_USUARIO, INSTAGRAM_CONTRASENA]):
-    print("❌ Error: Faltan variables de entorno")
-    exit(1)
+# ========== FUNCIÓN DE LOGIN DE INSTAGRAM CON MANEJO DE DESAFÍOS ==========
+def login_instagram(max_intentos=3):
+    """Intenta login con manejo de desafíos"""
+    
+    cliente = InstaClient()
+    
+    # Configurar delays aleatorios para simular comportamiento humano
+    cliente.request_timeout = 30
+    cliente.delay_range = [random.randint(1, 5) for _ in range(2)]
+    
+    print("=" * 50)
+    print("📱 INICIANDO SESIÓN EN INSTAGRAM")
+    print("=" * 50)
+    
+    for intento in range(max_intentos):
+        try:
+            print(f"🔄 Intento {intento + 1} de {max_intentos}")
+            
+            # Intentar cargar sesión guardada
+            if os.path.exists(ARCHIVO_SESION) and intento == 0:
+                print("📂 Cargando sesión guardada...")
+                cliente.load_settings(ARCHIVO_SESION)
+                
+                # Verificar que la sesión funciona
+                try:
+                    # Intentar una acción simple para verificar la sesión
+                    cliente.user_info(cliente.user_id)
+                    print("✅ Sesión cargada y válida")
+                    return cliente
+                except LoginRequired:
+                    print("⚠️ Sesión expirada, haciendo login nuevo...")
+                except Exception as e:
+                    print(f"⚠️ Error verificando sesión: {e}")
+            
+            # Login normal
+            print("🔄 Iniciando sesión con credenciales...")
+            time.sleep(random.randint(3, 8))  # Delay humano
+            
+            # Intentar login
+            cliente.login(INSTAGRAM_USUARIO, INSTAGRAM_CONTRASENA)
+            
+            # Guardar sesión para próximos usos
+            cliente.dump_settings(ARCHIVO_SESION)
+            print(f"✅ Login exitoso como {INSTAGRAM_USUARIO}")
+            
+            # Mostrar información de la cuenta
+            user_info = cliente.user_info(cliente.user_id)
+            print(f"👤 Usuario: {user_info.username}")
+            print(f"📊 Seguidores: {user_info.follower_count}")
+            print(f"📸 Posts: {user_info.media_count}")
+            
+            return cliente
+            
+        except ChallengeRequired as e:
+            print(f"⚠️ DESAFÍO REQUERIDO (intento {intento + 1})")
+            print("Instagram pide verificación adicional.")
+            
+            if intento < max_intentos - 1:
+                print("📧 Revisa tu email o teléfono y completa la verificación")
+                print("⏱️ Esperando 60 segundos...")
+                
+                # Guardar URL del desafío si está disponible
+                if hasattr(e, 'challenge_url'):
+                    print(f"🔗 URL del desafío: {e.challenge_url}")
+                
+                # Intentar obtener el código de verificación
+                try:
+                    # Esto puede variar según la implementación
+                    cliente.challenge_resolve()
+                except:
+                    pass
+                
+                time.sleep(60)
+            else:
+                print("❌ Máximo de intentos alcanzado para el desafío")
+                
+        except Exception as e:
+            print(f"❌ Error inesperado: {e}")
+            if intento < max_intentos - 1:
+                print(f"⏱️ Esperando 30 segundos antes de reintentar...")
+                time.sleep(30)
+            else:
+                print("❌ Máximo de intentos alcanzado")
+    
+    return None
 
-# Login en Instagram
-try:
-    cliente_insta = InstaClient()
-    cliente_insta.login(INSTAGRAM_USUARIO, INSTAGRAM_CONTRASENA)
-    print(f"✅ Login exitoso en Instagram como {INSTAGRAM_USUARIO}")
-except Exception as e:
-    print(f"❌ Error en login de Instagram: {e}")
-    exit(1)
+# ========== INICIALIZAR CLIENTE DE INSTAGRAM ==========
+print("🚀 Iniciando bot de Instagram Reels...")
+cliente_insta = login_instagram()
 
-# Cliente de Telegram
+if not cliente_insta:
+    print("❌ No se pudo iniciar sesión en Instagram")
+    print("El bot continuará pero puede tener problemas para subir videos")
+    # No salimos, intentamos continuar sin Instagram
+
+# ========== INICIALIZAR CLIENTE DE TELEGRAM ==========
 app = Client(
     "mi_bot",
     api_id=int(TELEGRAM_API_ID),
@@ -41,7 +138,6 @@ app = Client(
 )
 
 # ========== FUNCIONES PARA GUARDAR Y RECUPERAR EL MODO DEL USUARIO ==========
-
 def guardar_modo_usuario(user_id, modo):
     """Guarda el modo actual del usuario (simple, multiple, normal)"""
     try:
@@ -81,9 +177,7 @@ def obtener_modo_usuario(user_id):
         pass
     return "normal"  # Modo por defecto
 
-# ========== FUNCIONES EXISTENTES ==========
-
-# Función de autorización
+# ========== FUNCIONES DE AUTORIZACIÓN ==========
 def esta_autorizado(user_id):
     try:
         with open(ARCHIVO_USUARIOS_AUTORIZADOS, "r") as file:
@@ -92,7 +186,7 @@ def esta_autorizado(user_id):
     except:
         return False
 
-# Función para leer caption por defecto
+# ========== FUNCIONES PARA CAPTIONS ==========
 def obtener_caption_defecto():
     try:
         with open(ARCHIVO_CAPTION, "r", encoding="utf-8") as file:
@@ -100,7 +194,6 @@ def obtener_caption_defecto():
     except:
         return "Video subido desde Telegram"
 
-# Función para guardar caption por defecto
 def guardar_caption_defecto(caption):
     try:
         with open(ARCHIVO_CAPTION, "w", encoding="utf-8") as file:
@@ -109,8 +202,7 @@ def guardar_caption_defecto(caption):
     except:
         return False
 
-# ========== MENSAJES DE ESTADO ==========
-
+# ========== FUNCIÓN PARA MOSTRAR ESTADO ==========
 async def mostrar_estado_modo(client, chat_id, user_id):
     """Muestra el modo actual al usuario"""
     modo = obtener_modo_usuario(user_id)
@@ -124,8 +216,7 @@ async def mostrar_estado_modo(client, chat_id, user_id):
     
     await client.send_message(chat_id, texto)
 
-# ========== HANDLERS ==========
-
+# ========== HANDLER PARA /start ==========
 @app.on_message(filters.command("start"))
 async def inicio(client, message):
     user_id = message.from_user.id
@@ -143,16 +234,21 @@ async def inicio(client, message):
         [InlineKeyboardButton("📊 Ver mi modo", callback_data="ver_modo")]
     ])
     
+    # Verificar si Instagram está conectado
+    estado_instagram = "✅ Conectado" if cliente_insta else "❌ Desconectado"
+    
     await message.reply(
-        "👋 ¡Bienvenido al bot!\n\n"
+        f"👋 ¡Bienvenido al bot!\n\n"
+        f"**Instagram:** {estado_instagram}\n\n"
         "**Selecciona un modo:**\n"
-        "• 📤 **Modo Subir un Reels**: Se mantendrá activo hasta que lo cambies. Cada video que envíes te pedirá caption.\n"
-        "• 📤 **Modo Subir Múltiples**: Se mantendrá activo. Envía varios videos y usa /listo para subirlos todos.\n"
-        "• 🔄 **Modo Normal**: Solo responde a los botones del menú.\n\n"
+        "• 📤 **Modo Subir un Reels**: Se mantendrá activo hasta que lo cambies.\n"
+        "• 📤 **Modo Subir Múltiples**: Se mantendrá activo. Envía varios videos y usa /listo.\n"
+        "• 🔄 **Modo Normal**: Solo responde a los botones.\n\n"
         "**El modo se mantiene activo hasta que lo cambies manualmente.**",
         reply_markup=keyboard
     )
 
+# ========== HANDLER PARA /listo ==========
 @app.on_message(filters.command("listo"))
 async def listo_multiples(client, message):
     user_id = message.from_user.id
@@ -185,13 +281,13 @@ async def listo_multiples(client, message):
     else:
         await message.reply("❌ No hay videos pendientes. Envía algunos videos primero.")
 
+# ========== HANDLER PARA /modo ==========
 @app.on_message(filters.command("modo"))
 async def ver_modo_command(client, message):
     user_id = message.from_user.id
     await mostrar_estado_modo(client, message.chat.id, user_id)
 
 # ========== CALLBACKS PARA BOTONES INLINE ==========
-
 @app.on_callback_query()
 async def manejar_callbacks(client, callback_query):
     user_id = callback_query.from_user.id
@@ -252,13 +348,17 @@ async def manejar_callbacks(client, callback_query):
     
     await callback_query.answer()
 
-# ========== MANEJAR VIDEOS ==========
-
+# ========== HANDLER PARA VIDEOS ==========
 @app.on_message(filters.video)
 async def manejar_video(client, message):
     user_id = message.from_user.id
     
     if not esta_autorizado(user_id):
+        return
+    
+    # Verificar si Instagram está conectado
+    if not cliente_insta:
+        await message.reply("❌ Instagram no está conectado. El bot no puede subir videos.")
         return
     
     modo = obtener_modo_usuario(user_id)
@@ -269,7 +369,9 @@ async def manejar_video(client, message):
     
     if modo == "simple":
         # Modo simple: por cada video, pedir caption
+        await message.reply("📥 Descargando video...")
         ruta_video = await message.download()
+        
         datos_usuario[user_id] = {
             'ruta_video': ruta_video,
             'esperando': 'caption',
@@ -288,6 +390,7 @@ async def manejar_video(client, message):
             datos_usuario[user_id] = {'videos': [], 'esperando': 'videos', 'multiple': True}
         
         if datos_usuario[user_id].get('esperando') == 'videos':
+            await message.reply("📥 Descargando video...")
             ruta_video = await message.download()
             datos_usuario[user_id]['videos'].append(ruta_video)
             
@@ -300,13 +403,17 @@ async def manejar_video(client, message):
         else:
             await message.reply("❌ Ya estás procesando un lote. Termina con /listo primero.")
 
-# ========== MANEJAR TEXTO ==========
-
+# ========== HANDLER PARA TEXTO ==========
 @app.on_message(filters.text & ~filters.command(["start", "listo", "modo"]))
 async def manejar_texto(client, message):
     user_id = message.from_user.id
     
     if not esta_autorizado(user_id):
+        return
+    
+    # Verificar si Instagram está conectado
+    if not cliente_insta:
+        await message.reply("❌ Instagram no está conectado. El bot no puede subir videos.")
         return
     
     # Verificar si está esperando caption o caption por defecto
@@ -327,6 +434,7 @@ async def manejar_texto(client, message):
                         cliente_insta.clip_upload(ruta_video, caption)
                         
                         if i < len(videos):
+                            await message.reply(f"⏱️ Esperando 30 segundos antes del siguiente video...")
                             await asyncio.sleep(30)  # Esperar 30 segundos entre subidas
                             
                     except Exception as e:
@@ -392,6 +500,19 @@ async def manejar_texto(client, message):
         # Si no está esperando nada, mostrar el modo actual
         await mostrar_estado_modo(client, message.chat.id, user_id)
 
+# ========== HANDLER PARA CUANDO EL BOT SE DETIENE ==========
+@app.on_message(filters.command("stop") & filters.user("self"))
+async def stop_bot(client, message):
+    await message.reply("🛑 Deteniendo el bot...")
+    await client.stop()
+
+# ========== INICIO DEL BOT ==========
 if __name__ == "__main__":
-    print("🚀 Bot iniciado con modos persistentes!")
+    print("=" * 50)
+    print("🚀 BOT DE INSTAGRAM REELS INICIADO")
+    print("=" * 50)
+    print(f"📱 Instagram: {INSTAGRAM_USUARIO}")
+    print(f"✅ Conectado: {cliente_insta is not None}")
+    print("=" * 50)
+    
     app.run()
