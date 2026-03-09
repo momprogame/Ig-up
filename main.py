@@ -23,9 +23,8 @@ if not all([TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_BOT_TOKEN]):
     print("❌ Error: Faltan variables de entorno de Telegram")
     exit(1)
 
-# ========== DICCIONARIO PARA DATOS TEMPORALES ==========
-# {user_id: {'esperando': 'caption', 'ruta_video': 'ruta', 'multiple': False}}
-datos_usuario = {}
+# ========== VARIABLES GLOBALES ==========
+datos_usuario = {}  # Diccionario para datos temporales de usuarios
 cliente_insta = None  # Cliente global de Instagram (inicialmente None)
 
 # ========== FUNCIONES PARA GUARDAR CREDENCIALES ==========
@@ -194,8 +193,8 @@ def obtener_modo_usuario(user_id):
 # ========== FUNCIÓN PARA MOSTRAR ESTADO ==========
 async def mostrar_estado_modo(client, chat_id, user_id):
     """Muestra el modo actual al usuario"""
-    modo = obtener_modo_usuario(user_id)
     global cliente_insta
+    modo = obtener_modo_usuario(user_id)
     
     estado_instagram = "✅ Conectado" if cliente_insta else "❌ Desconectado"
     
@@ -219,8 +218,8 @@ app = Client(
 # ========== HANDLER PARA /start ==========
 @app.on_message(filters.command("start"))
 async def inicio(client, message):
-    user_id = message.from_user.id
     global cliente_insta
+    user_id = message.from_user.id
     
     if not esta_autorizado(user_id):
         await message.reply(f"⛔ No autorizado. Tu ID: {user_id}")
@@ -253,8 +252,8 @@ async def inicio(client, message):
 # ========== HANDLER PARA /listo ==========
 @app.on_message(filters.command("listo"))
 async def listo_multiples(client, message):
-    user_id = message.from_user.id
     global cliente_insta
+    user_id = message.from_user.id
     
     if not esta_autorizado(user_id):
         return
@@ -296,8 +295,8 @@ async def ver_modo_command(client, message):
 # ========== HANDLER PARA /logout ==========
 @app.on_message(filters.command("logout"))
 async def logout_instagram(client, message):
-    user_id = message.from_user.id
     global cliente_insta
+    user_id = message.from_user.id
     
     if not esta_autorizado(user_id):
         return
@@ -320,9 +319,9 @@ async def logout_instagram(client, message):
 # ========== CALLBACKS PARA BOTONES INLINE ==========
 @app.on_callback_query()
 async def manejar_callbacks(client, callback_query):
+    global cliente_insta
     user_id = callback_query.from_user.id
     data = callback_query.data
-    global cliente_insta
     
     if not esta_autorizado(user_id):
         await callback_query.answer("⛔ No autorizado", show_alert=True)
@@ -428,8 +427,8 @@ async def manejar_callbacks(client, callback_query):
 # ========== HANDLER PARA VIDEOS ==========
 @app.on_message(filters.video)
 async def manejar_video(client, message):
-    user_id = message.from_user.id
     global cliente_insta
+    user_id = message.from_user.id
     
     if not esta_autorizado(user_id):
         return
@@ -480,8 +479,8 @@ async def manejar_video(client, message):
 # ========== HANDLER PARA TEXTO ==========
 @app.on_message(filters.text & ~filters.command(["start", "listo", "modo", "logout"]))
 async def manejar_texto(client, message):
-    user_id = message.from_user.id
     global cliente_insta
+    user_id = message.from_user.id
     
     if not esta_autorizado(user_id):
         return
@@ -533,7 +532,6 @@ async def manejar_texto(client, message):
                 cliente.login(username, password, verification_code=code)
                 cliente.dump_settings(ARCHIVO_SESION)
                 
-                global cliente_insta
                 cliente_insta = cliente
                 guardar_credenciales(username, password)
                 
@@ -656,4 +654,4 @@ if __name__ == "__main__":
     print(f"📱 Instagram: {'✅ Conectado' if cliente_insta else '❌ Desconectado'}")
     print("=" * 50)
     
-    app.run()	
+    app.run()
