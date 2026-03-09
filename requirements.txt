@@ -1,5 +1,5 @@
 pyrogram==2.0.106
 instagrapi==2.3.0
 pytgcalls==3.0.0.dev24
-tgCrypto==0.1.9
+tgCrypto==1.2.5
 asyncio==3.4.3
